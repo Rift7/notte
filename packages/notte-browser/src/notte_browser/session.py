@@ -4,13 +4,17 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import ClassVar, Unpack
 
+import anyio
+
 # Enable nested event loops (required for Jupyter)
 import nest_asyncio  # pyright: ignore[reportMissingTypeStubs]
 from loguru import logger
 from notte_core.actions import (
     BaseAction,
+    DataAction,
     GotoAction,
     InteractionAction,
+    ReadFileAction,
     ScrapeAction,
     WaitAction,
 )
@@ -282,6 +286,17 @@ class NotteSession(AsyncResource, SyncResource):
             return locator
         return None
 
+    async def _adata(self, action: DataAction) -> DataSpace:
+        match action:
+            case ScrapeAction(instructions=instructions):
+                return await self.ascrape(instructions=instructions)
+            case ReadFileAction(file_path=file_path):
+                async with await anyio.open_file(file_path, "r") as f:
+                    content = await f.read()
+                return DataSpace(markdown=f"File name {f.name} content: {content}")
+            case _:
+                raise ValueError(f"Unsupported data action: {action.type}")
+
     @timeit("execute")
     @track_usage("page.execute")
     async def aexecute(self, **data: Unpack[StepRequestDict]) -> Observation:
@@ -292,9 +307,9 @@ class NotteSession(AsyncResource, SyncResource):
         if config.verbose:
             logger.info(f"🌌 starting execution of action '{action.type}' ...")
         action = NodeResolutionPipe.forward(action, self._snapshot, verbose=config.verbose)
-        if isinstance(action, ScrapeAction):
+        if isinstance(action, DataAction):
             # Scrape action is a special case
-            self.obs.data = await self.ascrape(instructions=action.instructions)
+            self.obs.data = await self._adata(action)
             return self.obs
         snapshot = await self.controller.execute(self.window, action)
         if config.verbose:
