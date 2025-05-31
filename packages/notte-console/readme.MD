@@ -1,0 +1,1 @@
+Local console for Notte hosted in Docker
